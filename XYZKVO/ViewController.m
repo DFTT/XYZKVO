@@ -26,7 +26,7 @@
     [super viewDidLoad];
     
 //    Test *vc = [[Test alloc] init];
-//    [vc xyz_observerKeyPath:@"txt" changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
+//    [vc xyz_observerKeyPath:XYZ_KeyPath(vc, txt) changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
 //
 //        NSLog(@"%@- %@- %@", obj, oldValue, newValue);
 //    }];
@@ -66,7 +66,7 @@
     }
     Test *t = _dataArr[indexPath.row];
     cell.textLabel.text = t.txt;
-    [t xyz_observerKeyPath:@"txt" reuseCell:cell changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
+    [t xyz_observerKeyPath:XYZ_KeyPath(t, txt) reuseCell:cell changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
         cell.textLabel.text = newValue;
         NSLog(@"%d, 改变了......", (int)indexPath.row);
     }];

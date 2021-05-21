@@ -8,6 +8,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+
+#define XYZ_KeyPath(OBJC, key) [NSString stringWithUTF8String:((void)OBJC.key, # key)]
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef void(^XYZKVOBlock)(_Nonnull id obj, _Nullable id oldValue, _Nullable id newValue);
