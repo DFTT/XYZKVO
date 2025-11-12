@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5B2D30542EAF22D000E9DD36 /* XRootViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5B2D30532EAF22D000E9DD36 /* XRootViewController.m */; };
 		5B6629C225F9FD0C00FF61F6 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 5B6629C125F9FD0C00FF61F6 /* AppDelegate.m */; };
 		5B6629C825F9FD0C00FF61F6 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 5B6629C725F9FD0C00FF61F6 /* ViewController.m */; };
 		5B6629CB25F9FD0C00FF61F6 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 5B6629C925F9FD0C00FF61F6 /* Main.storyboard */; };
@@ -18,6 +19,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5B2D30522EAF22D000E9DD36 /* XRootViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = XRootViewController.h; sourceTree = "<group>"; };
+		5B2D30532EAF22D000E9DD36 /* XRootViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = XRootViewController.m; sourceTree = "<group>"; };
 		5B6629BD25F9FD0C00FF61F6 /* XYZKVO.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XYZKVO.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5B6629C025F9FD0C00FF61F6 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		5B6629C125F9FD0C00FF61F6 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -69,6 +72,8 @@
 				5B6629C125F9FD0C00FF61F6 /* AppDelegate.m */,
 				5B6629C625F9FD0C00FF61F6 /* ViewController.h */,
 				5B6629C725F9FD0C00FF61F6 /* ViewController.m */,
+				5B2D30522EAF22D000E9DD36 /* XRootViewController.h */,
+				5B2D30532EAF22D000E9DD36 /* XRootViewController.m */,
 				5B6629C925F9FD0C00FF61F6 /* Main.storyboard */,
 				5B6629CC25F9FD0F00FF61F6 /* Assets.xcassets */,
 				5B6629CE25F9FD0F00FF61F6 /* LaunchScreen.storyboard */,
@@ -167,6 +172,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5B6629DF25F9FE2900FF61F6 /* NSObject+XYZKVO.m in Sources */,
+				5B2D30542EAF22D000E9DD36 /* XRootViewController.m in Sources */,
 				5B6629C825F9FD0C00FF61F6 /* ViewController.m in Sources */,
 				5B6629C225F9FD0C00FF61F6 /* AppDelegate.m in Sources */,
 				5B6629D325F9FD0F00FF61F6 /* main.m in Sources */,

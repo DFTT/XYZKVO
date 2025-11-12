@@ -6,7 +6,7 @@
 //
 
 #import "AppDelegate.h"
-#import "ViewController.h"
+#import "XRootViewController.h"
 @interface AppDelegate ()
 
 @end
@@ -18,7 +18,7 @@
     
     
     _window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    _window.rootViewController = [ViewController new];
+    _window.rootViewController = [[UINavigationController alloc] initWithRootViewController:[XRootViewController new]];
     [_window makeKeyWindow];
     return YES;
 }

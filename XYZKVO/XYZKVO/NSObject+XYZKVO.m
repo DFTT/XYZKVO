@@ -9,22 +9,39 @@
 #import <objc/runtime.h>
 #import "XMHookUtility.h"
 
-@interface XYZ_Observer : NSObject
-{
-@public
-    __unsafe_unretained id _hostObj;
-    NSString   *_keypath;
-    XYZKVOBlock _callback;
-    NSString   *_makKey;
+
+NS_ASSUME_NONNULL_BEGIN
+
+// -- helper: ensure run on main thread (sync if caller not main) --
+static inline void _xyz_dispatch_sync_main_if_needed(void (^block)(void)) {
+    if (!block) return;
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
 }
+
+#pragma mark - Observer item
+
+@interface _XYZObserverItem : NSObject
+
+@property (nonatomic, weak) id hostObj;
+@property (nonatomic, copy, nullable) NSString *keypath;
+@property (nonatomic, copy, nullable) XYZKVOBlock callback;
+@property (nonatomic, copy, nullable) NSString *mapKey;
+
+- (void)removeKVOAndRemoveSelfFrom:(nullable NSMutableDictionary<NSString *, _XYZObserverItem *> *)map;
 @end
 
-@implementation XYZ_Observer
-- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
-        
-    if (nil == _callback) {
-        return;
-    }
+@implementation _XYZObserverItem
+
+- (void)observeValueForKeyPath:(nullable NSString *)keyPath
+                      ofObject:(nullable id)object
+                        change:(nullable NSDictionary<NSKeyValueChangeKey, id> *)change
+                       context:(nullable void *)context {
+    XYZKVOBlock cb = self.callback;
+    if (cb == nil) return;
     
     NSKeyValueChange changeKind = [[change objectForKey:NSKeyValueChangeKindKey] integerValue];
     if (changeKind != NSKeyValueChangeSetting) return;
@@ -34,75 +51,162 @@
     
     id newVal = [change objectForKey:NSKeyValueChangeNewKey];
     if (newVal == [NSNull null]) newVal = nil;
+    
+    cb(object, oldVal, newVal);
+}
 
-    _callback(object, oldVal, newVal);
+- (void)removeKVOAndRemoveSelfFrom:(nullable NSMutableDictionary<NSString *, _XYZObserverItem *> *)map {
+    id host = self.hostObj;
+    NSString *kp = self.keypath;
+    if (host && kp.length > 0) {
+        @try {
+            [host removeObserver:self forKeyPath:kp];
+        } @catch (NSException *exception) {
+            // ignore
+        }
+        // clear local references
+        self.keypath = nil;
+        self.hostObj = nil;
+        
+        if (map != nil && self.mapKey != nil) {
+            [map removeObjectForKey:self.mapKey];
+            self.mapKey = nil;
+        }
+        
+        self.callback = nil;
+    } else {
+        // no host or no keypath: just clear callback
+        self.callback = nil;
+        self.keypath = nil;
+        self.mapKey = nil;
+        self.hostObj = nil;
+    }
 }
 
 - (void)dealloc {
-    // 此dealloc执行时 宿主dealloc正在执行 此时正好移除
-    [_hostObj removeObserver:self forKeyPath:_keypath];
+    // defensive: attempt removal; passing nil is fine because map may already be gone
+    [self removeKVOAndRemoveSelfFrom:nil];
 }
+
 @end
 
 
+@interface _XYZCellKVOProxy : NSObject
+@property (nonatomic, strong, readonly) NSHashTable<_XYZObserverItem *> *observers;
+- (void)removeAll;
+- (void)addWeakObserver:(_XYZObserverItem *)item;
+@end
+
+@interface UITableViewCell (XYZKVO)
+- (_XYZCellKVOProxy *)xyz_kvoProxy;
+@end
+
+@interface UICollectionViewCell (XYZKVO)
+- (_XYZCellKVOProxy *)xyz_kvoProxy;
+@end
+
+#pragma mark - Category Implementation
 
 @implementation NSObject (XYZKVO)
-- (void)xyz_observerKeyPath:(NSString *)keypath changeCallback:(nonnull XYZKVOBlock)callback {
-    [self p_addObserverKeyPath:keypath callback:callback];
+
+- (nullable NSString *)xyz_observerKeyPath:(NSString *)keypath
+                               immediately:(BOOL)immediately
+                            changeCallback:(XYZKVOBlock)callback {
+    _XYZObserverItem *item = [self p_addObserverKeyPath:keypath immediately:immediately callback:callback];
+    return item.mapKey;
 }
 
-- (void)xyz_observerKeyPath:(NSString *)keypath reuseCell:(UIView *)cell changeCallback:(XYZKVOBlock)callback {
-    if (!cell) {
-        return;
-    }
+- (nullable NSString *)xyz_observerKeyPath:(NSString *)keypath
+                                 reuseCell:(UIView *)cell
+                               immediately:(BOOL)immediately
+                            changeCallback:(XYZKVOBlock)callback {
+    if (!cell) return nil;
+    
+    _XYZCellKVOProxy *cellProxy = nil;
     if ([cell isKindOfClass:[UITableViewCell class]]) {
-        XYZ_Observer *observer = [self p_addObserverKeyPath:keypath callback:callback];
-        
-        [[(UITableViewCell *)cell xyz_weakObservers] addObject:observer];
-        return;
+        cellProxy = [(UITableViewCell *)cell xyz_kvoProxy];
+    }else if ([cell isKindOfClass:[UICollectionViewCell class]]) {
+        cellProxy = [(UICollectionViewCell *)cell xyz_kvoProxy];
+    }else {
+        NSAssert(NO, @"仅支持UITableViewCell or UICollectionViewCell");
+        return nil;
     }
-    if ([cell isKindOfClass:[UICollectionViewCell class]]) {
-        XYZ_Observer *observer = [self p_addObserverKeyPath:keypath callback:callback];
-        
-        [[(UICollectionViewCell *)cell xyz_weakObservers] addObject:observer];
-        return;
+    
+    _XYZObserverItem *item = [self p_addObserverKeyPath:keypath immediately:immediately callback:callback];
+    if (item != nil && cellProxy != nil) {
+        [cellProxy addWeakObserver:item];
     }
-    NSAssert(NO, @"仅支持UITableViewCell or UICollectionViewCell");
+    return item.mapKey;
 }
 
 - (void)xyz_rmAllObserver {
-    [[self xyz_observerMap] removeAllObjects];
+    NSMutableDictionary<NSString *, _XYZObserverItem *> *mMap = [self xyz_observerMap];
+    _xyz_dispatch_sync_main_if_needed(^{
+        NSArray<_XYZObserverItem *> *items = [mMap allValues];
+        [mMap removeAllObjects];
+        for (_XYZObserverItem *item in items) {
+            // map 参数传 nil，因为已经在锁内清空
+            [item removeKVOAndRemoveSelfFrom:nil];
+        }
+    });
 }
 
-- (void)p_xyz_removeObserverForMapKey:(NSString *)mapkey {
-    [[self xyz_observerMap] removeObjectForKey:mapkey];
+- (void)xyz_removeObserverFor:(NSString *)token {
+    NSMutableDictionary<NSString *, _XYZObserverItem *> *mMap = [self xyz_observerMap];
+    _XYZObserverItem *item = mMap[token];
+    _xyz_dispatch_sync_main_if_needed(^{
+        [item removeKVOAndRemoveSelfFrom:nil];
+        [mMap removeObjectForKey:token];
+    });
 }
-#pragma mark Private
-- (nullable XYZ_Observer *)p_addObserverKeyPath:(NSString *)keypath callback:(nonnull XYZKVOBlock)callback {
-    if (keypath == nil || keypath.length == 0 || nil == callback) {
-        return nil;
-    }
-    NSMutableDictionary *mMap = [self xyz_observerMap];
-    NSString *mapKey = [NSString stringWithFormat:@"xyz_%@_%x", keypath, (unsigned int)[callback hash]];
+#pragma mark - Private
 
-    XYZ_Observer *observer = [mMap objectForKey:mapKey];
-    if (observer) {
+- (nullable _XYZObserverItem *)p_addObserverKeyPath:(NSString *)keypath
+                                        immediately:(BOOL)immediately
+                                           callback:(XYZKVOBlock)callback {
+    if (keypath == nil || keypath.length == 0 || callback == nil) {
         return nil;
     }
-    observer = [[XYZ_Observer alloc] init];
-    observer->_hostObj  = self;
-    observer->_keypath  = keypath;
-    observer->_callback = callback;
-    observer->_makKey   = mapKey;
     
-    [self addObserver:observer forKeyPath:keypath options:NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew context:nil];
+    NSMutableDictionary<NSString *, _XYZObserverItem *> *mMap = [self xyz_observerMap];
     
-    [mMap setObject:observer forKey:mapKey];
+    XYZKVOBlock copiedCallback = [callback copy];
+    
+    NSString *mapKey = [NSString stringWithFormat:@"xyz_%@_%p", keypath, (void *)copiedCallback];
+    
+    __block _XYZObserverItem *observer = nil;
+    
+    _xyz_dispatch_sync_main_if_needed(^{
+        if ([mMap objectForKey:mapKey]) {
+            return; // already registered with this exact key
+        }
+        
+        observer = [[_XYZObserverItem alloc] init];
+        observer.hostObj  = self;
+        observer.keypath  = keypath;
+        observer.callback = copiedCallback;
+        observer.mapKey   = mapKey;
+        [self addObserver:observer forKeyPath:keypath options:NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew context:NULL];
+        [mMap setObject:observer forKey:mapKey];
+        
+        // 主线程回调
+        if (immediately) {
+            id immediateValue = nil;
+            @try {
+                immediateValue = [self valueForKeyPath:keypath];
+            } @catch (NSException *exception) {
+                immediateValue = nil;
+            }
+            // use copied callback
+            copiedCallback(self, nil, immediateValue);
+        }
+    });
     
     return observer;
 }
 
-- (NSMutableDictionary *)xyz_observerMap {
+- (NSMutableDictionary<NSString *, _XYZObserverItem *> *)xyz_observerMap {
+    // thread-safe lazy init
     NSMutableDictionary *mdic = objc_getAssociatedObject(self, @selector(xyz_observerMap));
     if (mdic == nil) {
         mdic = [NSMutableDictionary dictionary];
@@ -110,70 +214,94 @@
     }
     return mdic;
 }
-///
-- (NSHashTable *)xyz_weakObservers {
-    NSHashTable *table = objc_getAssociatedObject(self, @selector(xyz_weakObservers));
-    if (table == nil) {
-        table = [NSHashTable weakObjectsHashTable];
-        objc_setAssociatedObject(self, @selector(xyz_weakObservers), table, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+@end
+
+#pragma mark - UITableViewCell Swizzle
+
+@implementation _XYZCellKVOProxy
+- (instancetype)init {
+    if (self = [super init]) {
+        _observers = [NSHashTable weakObjectsHashTable];
     }
-    return table;
+    return self;
+}
+- (void)addWeakObserver:(_XYZObserverItem *)item {
+    @synchronized (self) {
+        [_observers addObject:item];
+    }
+}
+- (void)removeAll {
+    NSArray<_XYZObserverItem *> *items = nil;
+    @synchronized (self) {
+        items = [_observers allObjects];
+        [_observers removeAllObjects];
+    }
+    // 在锁外进行 KVO 移除，避免持 proxy 锁期间触发 host 锁或跨线程等待
+    for (_XYZObserverItem *item in items) {
+        [item removeKVOAndRemoveSelfFrom:[item.hostObj xyz_observerMap]];
+    }
+}
+- (void)dealloc {
+    [self removeAll];
 }
 @end
 
-
-
-
-@interface UITableViewCell (XYZKVO)
-@end
 @implementation UITableViewCell (XYZKVO)
+
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // swizzle viewDidLoad
-        SEL originalSelector_0 = @selector(prepareForReuse);
-        SEL swizzledSelector_0 = @selector(xyz_kvo_prepareForReuse);
-        [XMHookUtility swizzleMethodForClass:[self class] originalSelector:originalSelector_0 swizzledSelector:swizzledSelector_0];
+        SEL originalSelector = @selector(prepareForReuse);
+        SEL swizzledSelector = @selector(xyz_kvo_prepareForReuse);
+        [XMHookUtility swizzleMethodForClass:[self class] originalSelector:originalSelector swizzledSelector:swizzledSelector];
     });
 }
+
 - (void)xyz_kvo_prepareForReuse {
-    /// 这里移除kvo
-    NSHashTable *obs = [self xyz_weakObservers];
-    if (obs.count > 0) {
-        NSEnumerator *enumerator = [obs objectEnumerator];
-        XYZ_Observer *observer   = nil;
-        while (observer = [enumerator nextObject]) {
-            [observer->_hostObj p_xyz_removeObserverForMapKey:observer->_makKey];
-        }
-    }
+    [[self xyz_kvoProxy] removeAll];
+    // call original implementation (swizzled)
     [self xyz_kvo_prepareForReuse];
 }
+
+- (_XYZCellKVOProxy *)xyz_kvoProxy {
+    _XYZCellKVOProxy *proxy = objc_getAssociatedObject(self, @selector(xyz_kvoProxy));
+    if (!proxy) {
+        proxy = [[_XYZCellKVOProxy alloc] init];
+        objc_setAssociatedObject(self, @selector(xyz_kvoProxy), proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return proxy;
+}
+
 @end
 
+#pragma mark - UICollectionViewCell Swizzle
 
-
-@interface UICollectionViewCell (XYZKVO)
-@end
 @implementation UICollectionViewCell (XYZKVO)
+
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // swizzle viewDidLoad
-        SEL originalSelector_0 = @selector(prepareForReuse);
-        SEL swizzledSelector_0 = @selector(xyz_kvo_prepareForReuse);
-        [XMHookUtility swizzleMethodForClass:[self class] originalSelector:originalSelector_0 swizzledSelector:swizzledSelector_0];
+        SEL originalSelector = @selector(prepareForReuse);
+        SEL swizzledSelector = @selector(xyz_kvo_prepareForReuse);
+        [XMHookUtility swizzleMethodForClass:[self class] originalSelector:originalSelector swizzledSelector:swizzledSelector];
     });
 }
+
 - (void)xyz_kvo_prepareForReuse {
-    /// 这里移除kvo
-    NSHashTable *obs = [self xyz_weakObservers];
-    if (obs.count > 0) {
-        NSEnumerator *enumerator = [obs objectEnumerator];
-        XYZ_Observer *observer   = nil;
-        while (observer = [enumerator nextObject]) {
-            [observer->_hostObj p_xyz_removeObserverForMapKey:observer->_makKey];
-        }
-    }
+    [[self xyz_kvoProxy] removeAll];
+    //
     [self xyz_kvo_prepareForReuse];
 }
+
+- (_XYZCellKVOProxy *)xyz_kvoProxy {
+    _XYZCellKVOProxy *proxy = objc_getAssociatedObject(self, @selector(xyz_kvoProxy));
+    if (!proxy) {
+        proxy = [[_XYZCellKVOProxy alloc] init];
+        objc_setAssociatedObject(self, @selector(xyz_kvoProxy), proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return proxy;
+}
+
 @end
+
+NS_ASSUME_NONNULL_END

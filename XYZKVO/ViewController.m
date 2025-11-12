@@ -65,10 +65,12 @@
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"cell"];
     }
     Test *t = _dataArr[indexPath.row];
-    cell.textLabel.text = t.txt;
-    [t xyz_observerKeyPath:XYZ_KeyPath(t, txt) reuseCell:cell changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
+//    cell.textLabel.text = t.txt;
+    [t xyz_observerKeyPath:XYZ_KeyPath(t, txt) reuseCell:cell immediately:true changeCallback:^(id  _Nonnull obj, id  _Nullable oldValue, id  _Nullable newValue) {
         cell.textLabel.text = newValue;
-        NSLog(@"%d, 改变了......", (int)indexPath.row);
+        if (oldValue != nil) {        
+            NSLog(@"%d, 改变了......", (int)indexPath.row);
+        }
     }];
     return cell;
 }
